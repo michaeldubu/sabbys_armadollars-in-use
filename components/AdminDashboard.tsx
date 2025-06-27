@@ -72,8 +72,17 @@ type Redemption = {
   approved_at?: string
   admin_notes?: string
   employee_name?: string
-  employees: { name: string }
+  employees?: { name: string }
   rewards?: { name: string }
+}
+
+type PasswordResetRequest = {
+  id: string
+  employee_id: string
+  employee_name: string
+  requested_at: string
+  status: "pending" | "processed"
+  admin_notes?: string
 }
 
 interface AdminDashboardProps {
@@ -87,6 +96,7 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
   const [complaints, setComplaints] = useState<Complaint[]>([])
   const [rewards, setRewards] = useState<Reward[]>([])
   const [redemptions, setRedemptions] = useState<Redemption[]>([])
+  const [passwordResets, setPasswordResets] = useState<PasswordResetRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const { toast } = useToast()
@@ -116,92 +126,203 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
   const [isViewRedemptionDialogOpen, setIsViewRedemptionDialogOpen] = useState(false)
 
   const fetchEmployees = useCallback(async () => {
-    const { data, error } = await supabase.from("employees").select("*")
-    if (error) {
-      console.error("Error fetching employees:", error)
+    try {
+      console.log("Fetching employees...")
+      const { data, error } = await supabase.from("employees").select("*").eq("active", true)
+      if (error) {
+        console.error("Error fetching employees:", error)
+        throw error
+      }
+      console.log("Employees fetched:", data?.length || 0)
+      return data || []
+    } catch (error) {
+      console.error("Error in fetchEmployees:", error)
       toast({ title: "Error", description: "Failed to load employees.", variant: "destructive" })
       return []
     }
-    return data
   }, [toast])
 
   const fetchTasks = useCallback(async () => {
-    const { data, error } = await supabase.from("tasks").select("*")
-    if (error) {
-      console.error("Error fetching tasks:", error)
+    try {
+      console.log("Fetching tasks...")
+      const { data, error } = await supabase.from("tasks").select("*")
+      if (error) {
+        console.error("Error fetching tasks:", error)
+        throw error
+      }
+      console.log("Tasks fetched:", data?.length || 0)
+      return data || []
+    } catch (error) {
+      console.error("Error in fetchTasks:", error)
       toast({ title: "Error", description: "Failed to load tasks.", variant: "destructive" })
       return []
     }
-    return data
   }, [toast])
 
   const fetchComplaints = useCallback(async () => {
-    const { data, error } = await supabase.from("complaints").select(`*, employees (name)`)
-    if (error) {
-      console.error("Error fetching complaints:", error)
+    try {
+      console.log("Fetching complaints...")
+      const { data, error } = await supabase.from("complaints").select(`*, employees (name)`)
+      if (error) {
+        console.error("Error fetching complaints:", error)
+        throw error
+      }
+      console.log("Complaints fetched:", data?.length || 0)
+      return (data || []).map((complaint) => ({
+        ...complaint,
+        employee_name: complaint.employees ? complaint.employees.name : "Unknown",
+      }))
+    } catch (error) {
+      console.error("Error in fetchComplaints:", error)
       toast({ title: "Error", description: "Failed to load complaints.", variant: "destructive" })
       return []
     }
-    return data.map((complaint) => ({
-      ...complaint,
-      employee_name: complaint.employees ? complaint.employees.name : "Unknown",
-    }))
   }, [toast])
 
   const fetchRewards = useCallback(async () => {
-    const { data, error } = await supabase.from("rewards").select("*").order("cost")
-    if (error) {
-      console.error("Error fetching rewards:", error)
+    try {
+      console.log("Fetching rewards...")
+      const { data, error } = await supabase.from("rewards").select("*").order("cost")
+      if (error) {
+        console.error("Error fetching rewards:", error)
+        throw error
+      }
+      console.log("Rewards fetched:", data?.length || 0)
+      return data || []
+    } catch (error) {
+      console.error("Error in fetchRewards:", error)
       toast({ title: "Error", description: "Failed to load rewards.", variant: "destructive" })
       return []
     }
-    return data
   }, [toast])
 
   const fetchRedemptions = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("redemptions")
-      .select(`*, employees (name), rewards (name)`)
-      .order("redeemed_at", { ascending: false })
-    if (error) {
-      console.error("Error fetching redemptions:", error)
+    try {
+      console.log("Fetching redemptions...")
+
+      // First, let's check if the redemptions table exists and has data
+      const { data: redemptionsData, error: redemptionsError } = await supabase
+        .from("redemptions")
+        .select("*")
+        .order("redeemed_at", { ascending: false })
+
+      if (redemptionsError) {
+        console.error("Error fetching redemptions:", redemptionsError)
+        // If table doesn't exist, return empty array instead of throwing
+        if (redemptionsError.code === "42P01") {
+          console.log("Redemptions table doesn't exist yet")
+          return []
+        }
+        throw redemptionsError
+      }
+
+      console.log("Raw redemptions data:", redemptionsData)
+
+      if (!redemptionsData || redemptionsData.length === 0) {
+        console.log("No redemptions found")
+        return []
+      }
+
+      // Now fetch employee names for each redemption
+      const redemptionsWithNames = await Promise.all(
+        redemptionsData.map(async (redemption) => {
+          try {
+            const { data: employee, error: empError } = await supabase
+              .from("employees")
+              .select("name")
+              .eq("id", redemption.employee_id)
+              .single()
+
+            if (empError) {
+              console.error("Error fetching employee for redemption:", empError)
+            }
+
+            return {
+              ...redemption,
+              employee_name: employee?.name || "Unknown Employee",
+            }
+          } catch (error) {
+            console.error("Error processing redemption:", error)
+            return {
+              ...redemption,
+              employee_name: "Unknown Employee",
+            }
+          }
+        }),
+      )
+
+      console.log("Redemptions with names:", redemptionsWithNames)
+      return redemptionsWithNames
+    } catch (error) {
+      console.error("Error in fetchRedemptions:", error)
       toast({ title: "Error", description: "Failed to load redemptions.", variant: "destructive" })
       return []
     }
-    return data.map((r) => ({
-      ...r,
-      employee_name: r.employees ? r.employees.name : "Unknown",
-      reward_name: r.reward_name || (r.rewards ? r.rewards.name : "Unknown Reward"),
-    }))
   }, [toast])
 
+  const fetchPasswordResets = useCallback(async () => {
+    try {
+      console.log("Fetching password reset requests...")
+      const { data, error } = await supabase
+        .from("password_reset_requests")
+        .select("*")
+        .eq("status", "pending")
+        .order("requested_at", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching password resets:", error)
+        // If table doesn't exist, return empty array
+        if (error.code === "42P01") {
+          console.log("Password reset requests table doesn't exist yet")
+          return []
+        }
+        throw error
+      }
+      console.log("Password resets fetched:", data?.length || 0)
+      return data || []
+    } catch (error) {
+      console.error("Error in fetchPasswordResets:", error)
+      return []
+    }
+  }, [])
+
   const loadData = useCallback(async () => {
+    console.log("Starting to load admin dashboard data...")
     setLoading(true)
     setError("")
+
     try {
-      const [employeesData, tasksData, complaintsData, rewardsData, redemptionsData] = await Promise.all([
-        fetchEmployees(),
-        fetchTasks(),
-        fetchComplaints(),
-        fetchRewards(),
-        fetchRedemptions(),
-      ])
+      const [employeesData, tasksData, complaintsData, rewardsData, redemptionsData, passwordResetsData] =
+        await Promise.all([
+          fetchEmployees(),
+          fetchTasks(),
+          fetchComplaints(),
+          fetchRewards(),
+          fetchRedemptions(),
+          fetchPasswordResets(),
+        ])
+
+      console.log("All data loaded successfully")
       setEmployees(employeesData)
       setTasks(tasksData)
       setComplaints(complaintsData)
       setRewards(rewardsData)
       setRedemptions(redemptionsData)
+      setPasswordResets(passwordResetsData)
     } catch (err) {
       console.error("Error loading admin data:", err)
+      setError(`Failed to load dashboard data: ${err.message}`)
       toast({ title: "Error", description: "Failed to load dashboard data.", variant: "destructive" })
     } finally {
       setLoading(false)
     }
-  }, [fetchEmployees, fetchTasks, fetchComplaints, fetchRewards, fetchRedemptions, toast])
+  }, [fetchEmployees, fetchTasks, fetchComplaints, fetchRewards, fetchRedemptions, fetchPasswordResets, toast])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (user?.role === "admin") {
+      loadData()
+    }
+  }, [loadData, user])
 
   const handleGiveBonus = async () => {
     if (!selectedEmployeeId || !bonusAmount || !bonusReason) {
@@ -443,21 +564,27 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
 
       if (fetchError) throw fetchError
 
-      // Refund the Armadollars
+      // Refund the Armadollars (unless it's Sabrina with unlimited currency)
       const { data: employee, error: employeeFetchError } = await supabase
         .from("employees")
-        .select("armadollars")
+        .select("armadollars, name")
         .eq("id", redemption.employee_id)
         .single()
 
       if (employeeFetchError) throw employeeFetchError
 
-      const { error: refundError } = await supabase
-        .from("employees")
-        .update({ armadollars: employee.armadollars + redemption.cost })
-        .eq("id", redemption.employee_id)
+      // Check if it's Sabrina (unlimited currency)
+      const isSabrina =
+        employee.name?.toLowerCase().includes("sabrina") && employee.name?.toLowerCase().includes("wofford")
 
-      if (refundError) throw refundError
+      if (!isSabrina) {
+        const { error: refundError } = await supabase
+          .from("employees")
+          .update({ armadollars: employee.armadollars + redemption.cost })
+          .eq("id", redemption.employee_id)
+
+        if (refundError) throw refundError
+      }
 
       // Update redemption status
       const { error } = await supabase
@@ -471,7 +598,12 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
         .eq("id", redemptionId)
       if (error) throw error
 
-      toast({ title: "Success!", description: "Redemption denied and Armadollars refunded!" })
+      toast({
+        title: "Success!",
+        description: isSabrina
+          ? "Redemption denied (no refund needed for unlimited currency)!"
+          : "Redemption denied and Armadollars refunded!",
+      })
       await loadData()
       loadInitialData() // Refresh user data
     } catch (err) {
@@ -514,7 +646,14 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
   }
 
   if (error) {
-    return <div className="text-roadhouseRed text-center p-4 font-bold">{error}</div>
+    return (
+      <div className="text-roadhouseRed text-center p-4 font-bold">
+        <p>{error}</p>
+        <Button onClick={loadData} className="mt-4 bg-roadhouseRed text-roadhouseWhite">
+          Retry Loading
+        </Button>
+      </div>
+    )
   }
 
   if (user?.role !== "admin") {
@@ -526,13 +665,14 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
   }
 
   const pendingRedemptions = redemptions.filter((r) => r.status === "pending").length
+  const pendingPasswordResets = passwordResets.length
 
   return (
     <div className="p-4 space-y-6">
       <h1 className="text-3xl font-bold text-roadhouseRed text-center">Admin Dashboard</h1>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-6 bg-roadhouseRed/10 text-roadhouseBlack">
+        <TabsList className="grid w-full grid-cols-7 bg-roadhouseRed/10 text-roadhouseBlack">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="bonus">Give Bonus</TabsTrigger>
           <TabsTrigger value="tasks">Manage Tasks</TabsTrigger>
@@ -542,6 +682,9 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
             Redemptions {pendingRedemptions > 0 && `(${pendingRedemptions})`}
           </TabsTrigger>
           <TabsTrigger value="complaints">Complaints</TabsTrigger>
+          <TabsTrigger value="password-resets">
+            Password Resets {pendingPasswordResets > 0 && `(${pendingPasswordResets})`}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -585,7 +728,12 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
                     <TableRow key={employee.id}>
                       <TableCell className="font-medium">{employee.name}</TableCell>
                       <TableCell>{employee.role}</TableCell>
-                      <TableCell className="text-right">{employee.armadollars.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">
+                        {employee.name?.toLowerCase().includes("sabrina") &&
+                        employee.name?.toLowerCase().includes("wofford")
+                          ? "∞ (Unlimited)"
+                          : employee.armadollars.toFixed(2)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -933,83 +1081,90 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-roadhouseYellow/20">
-                    <TableHead className="text-roadhouseBlack">Employee</TableHead>
-                    <TableHead className="text-roadhouseBlack">Reward</TableHead>
-                    <TableHead className="text-roadhouseBlack">Cost</TableHead>
-                    <TableHead className="text-roadhouseBlack">Status</TableHead>
-                    <TableHead className="text-roadhouseBlack">Date</TableHead>
-                    <TableHead className="text-roadhouseBlack text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {redemptions.map((redemption) => (
-                    <TableRow key={redemption.id}>
-                      <TableCell className="font-medium">{redemption.employee_name}</TableCell>
-                      <TableCell>{redemption.reward_name}</TableCell>
-                      <TableCell>{redemption.cost} 🪙</TableCell>
-                      <TableCell>
-                        {redemption.status === "pending" && (
-                          <span className="flex items-center text-roadhouseYellow">
-                            <Clock className="h-4 w-4 mr-1" />
-                            Pending
-                          </span>
-                        )}
-                        {redemption.status === "approved" && (
-                          <span className="flex items-center text-roadhouseGreen">
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Approved
-                          </span>
-                        )}
-                        {redemption.status === "denied" && (
-                          <span className="flex items-center text-roadhouseRed">
-                            <XCircle className="h-4 w-4 mr-1" />
-                            Denied
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>{new Date(redemption.redeemed_at).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleViewRedemption(redemption)}
-                            className="border-roadhouseYellow text-roadhouseYellow hover:bg-roadhouseYellow/10"
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="sr-only">View</span>
-                          </Button>
-                          {redemption.status === "pending" && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleApproveRedemption(redemption.id)}
-                                className="border-roadhouseGreen text-roadhouseGreen hover:bg-roadhouseGreen/10"
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                                <span className="sr-only">Approve</span>
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDenyRedemption(redemption.id)}
-                                className="border-roadhouseRed text-roadhouseRed hover:bg-roadhouseRed/10"
-                              >
-                                <XCircle className="h-4 w-4" />
-                                <span className="sr-only">Deny</span>
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
+              {redemptions.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-roadhouseBlack">No redemptions yet.</p>
+                  <p className="text-sm text-gray-600">Redemptions will appear here when employees cash out rewards.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-roadhouseYellow/20">
+                      <TableHead className="text-roadhouseBlack">Employee</TableHead>
+                      <TableHead className="text-roadhouseBlack">Reward</TableHead>
+                      <TableHead className="text-roadhouseBlack">Cost</TableHead>
+                      <TableHead className="text-roadhouseBlack">Status</TableHead>
+                      <TableHead className="text-roadhouseBlack">Date</TableHead>
+                      <TableHead className="text-roadhouseBlack text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {redemptions.map((redemption) => (
+                      <TableRow key={redemption.id}>
+                        <TableCell className="font-medium">{redemption.employee_name}</TableCell>
+                        <TableCell>{redemption.reward_name}</TableCell>
+                        <TableCell>{redemption.cost} 🪙</TableCell>
+                        <TableCell>
+                          {redemption.status === "pending" && (
+                            <span className="flex items-center text-roadhouseYellow">
+                              <Clock className="h-4 w-4 mr-1" />
+                              Pending
+                            </span>
+                          )}
+                          {redemption.status === "approved" && (
+                            <span className="flex items-center text-roadhouseGreen">
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Approved
+                            </span>
+                          )}
+                          {redemption.status === "denied" && (
+                            <span className="flex items-center text-roadhouseRed">
+                              <XCircle className="h-4 w-4 mr-1" />
+                              Denied
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>{new Date(redemption.redeemed_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewRedemption(redemption)}
+                              className="border-roadhouseYellow text-roadhouseYellow hover:bg-roadhouseYellow/10"
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">View</span>
+                            </Button>
+                            {redemption.status === "pending" && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleApproveRedemption(redemption.id)}
+                                  className="border-roadhouseGreen text-roadhouseGreen hover:bg-roadhouseGreen/10"
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                  <span className="sr-only">Approve</span>
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDenyRedemption(redemption.id)}
+                                  className="border-roadhouseRed text-roadhouseRed hover:bg-roadhouseRed/10"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                  <span className="sr-only">Deny</span>
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1023,61 +1178,126 @@ export default function AdminDashboard({ user, loadInitialData }: AdminDashboard
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-roadhouseYellow/20">
-                    <TableHead className="text-roadhouseBlack">Employee</TableHead>
-                    <TableHead className="text-roadhouseBlack">Category</TableHead>
-                    <TableHead className="text-roadhouseBlack">Subject</TableHead>
-                    <TableHead className="text-roadhouseBlack">Status</TableHead>
-                    <TableHead className="text-roadhouseBlack text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {complaints.map((complaint) => (
-                    <TableRow key={complaint.id}>
-                      <TableCell className="font-medium">{complaint.employee_name}</TableCell>
-                      <TableCell>{complaint.category}</TableCell>
-                      <TableCell>{complaint.subject}</TableCell>
-                      <TableCell>
-                        {complaint.status === "resolved" ? (
-                          <span className="text-roadhouseGreen flex items-center">
-                            <CheckCircle className="h-4 w-4 mr-1" /> Resolved
-                          </span>
-                        ) : (
-                          <span className="text-roadhouseRed flex items-center">
-                            <XCircle className="h-4 w-4 mr-1" /> Pending
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleViewComplaint(complaint)}
-                            className="border-roadhouseYellow text-roadhouseYellow hover:bg-roadhouseYellow/10"
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="sr-only">View</span>
-                          </Button>
-                          {complaint.status !== "resolved" && (
+              {complaints.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-roadhouseBlack">No complaints submitted.</p>
+                  <p className="text-sm text-gray-600">Employee complaints will appear here.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-roadhouseYellow/20">
+                      <TableHead className="text-roadhouseBlack">Employee</TableHead>
+                      <TableHead className="text-roadhouseBlack">Category</TableHead>
+                      <TableHead className="text-roadhouseBlack">Subject</TableHead>
+                      <TableHead className="text-roadhouseBlack">Status</TableHead>
+                      <TableHead className="text-roadhouseBlack text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {complaints.map((complaint) => (
+                      <TableRow key={complaint.id}>
+                        <TableCell className="font-medium">{complaint.employee_name}</TableCell>
+                        <TableCell>{complaint.category}</TableCell>
+                        <TableCell>{complaint.subject}</TableCell>
+                        <TableCell>
+                          {complaint.status === "resolved" ? (
+                            <span className="text-roadhouseGreen flex items-center">
+                              <CheckCircle className="h-4 w-4 mr-1" /> Resolved
+                            </span>
+                          ) : (
+                            <span className="text-roadhouseRed flex items-center">
+                              <XCircle className="h-4 w-4 mr-1" /> Pending
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end space-x-2">
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleMarkComplaintResolved(complaint.id)}
-                              className="border-roadhouseGreen text-roadhouseGreen hover:bg-roadhouseGreen/10"
+                              onClick={() => handleViewComplaint(complaint)}
+                              className="border-roadhouseYellow text-roadhouseYellow hover:bg-roadhouseYellow/10"
                             >
-                              <CheckCircle className="h-4 w-4" />
-                              <span className="sr-only">Resolve</span>
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">View</span>
                             </Button>
-                          )}
-                        </div>
-                      </TableCell>
+                            {complaint.status !== "resolved" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleMarkComplaintResolved(complaint.id)}
+                                className="border-roadhouseGreen text-roadhouseGreen hover:bg-roadhouseGreen/10"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                                <span className="sr-only">Resolve</span>
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="password-resets" className="mt-4">
+          <Card className="bg-roadhouseWhite border-roadhouseRed shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-roadhouseRed">Password Reset Requests</CardTitle>
+              <CardDescription className="text-roadhouseBlack">
+                Handle employee password reset requests.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {passwordResets.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-roadhouseBlack">No password reset requests.</p>
+                  <p className="text-sm text-gray-600">Employee password reset requests will appear here.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-roadhouseYellow/20">
+                      <TableHead className="text-roadhouseBlack">Employee</TableHead>
+                      <TableHead className="text-roadhouseBlack">Requested</TableHead>
+                      <TableHead className="text-roadhouseBlack">Status</TableHead>
+                      <TableHead className="text-roadhouseBlack text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {passwordResets.map((request) => (
+                      <TableRow key={request.id}>
+                        <TableCell className="font-medium">{request.employee_name}</TableCell>
+                        <TableCell>{new Date(request.requested_at).toLocaleString()}</TableCell>
+                        <TableCell>
+                          <span className="text-roadhouseYellow flex items-center">
+                            <Clock className="h-4 w-4 mr-1" /> Pending
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              toast({
+                                title: "Password Reset",
+                                description: `Contact ${request.employee_name} to reset their password manually.`,
+                              })
+                            }}
+                            className="border-roadhouseGreen text-roadhouseGreen hover:bg-roadhouseGreen/10"
+                          >
+                            Contact Employee
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
