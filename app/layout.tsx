@@ -2,7 +2,6 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
-import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -18,7 +17,7 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Armadollars",
   },
-    generator: 'v0.dev'
+    generator: 'v0.app'
 }
 
 export default function RootLayout({
@@ -34,10 +33,7 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icon-192x192.png" />
       </head>
-      <body className={inter.className}>
-        {children}
-        <Toaster />
-      </body>
+      <body className={inter.className}>{children}</body>
     </html>
   )
 }
